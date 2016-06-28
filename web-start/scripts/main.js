@@ -74,7 +74,7 @@ FriendlyChat.prototype.loadMessages = function() {
   // Load the last 12 messages and listen for new ones
   var setMessages = function (data) {
     var val = data.val();
-    this.displayMessage(data.key, val.name, val.text, val.photoURL, val.imageUrl);
+    this.displayMessage(data.key, val.name, val.text, val.photoURL, val.imageURL);
   }.bind(this);
 
   this.messagesRef.limitToLast(12).on('child_added', setMessages);
@@ -105,9 +105,16 @@ FriendlyChat.prototype.saveMessage = function(e) {
 
 // Sets the URL of the given img element with the URL of the image stored in Firebase Storage.
 FriendlyChat.prototype.setImageUrl = function(imageUri, imgElement) {
-  imgElement.src = imageUri;
-
-  // TODO(DEVELOPER): If image is on Firebase Storage, fetch image URL and set img element's src.
+  // Check if the image is Firebase Storage URI
+  if (imageUri.startsWith("gs://")) {
+    // First display loading image, and meanwhile fetch the image
+    imgElement.src = FriendlyChat.LOADING_IMAGE_URL;
+    this.storage.refFromURL(imageUri).getMetadata().then(function (meta) {
+      imgElement.src = meta.downloadURLs[0];
+    });
+  } else {
+    imgElement.src = imageUri;
+  }
 };
 
 // Saves a new message containing an image URI in Firebase.
@@ -129,9 +136,25 @@ FriendlyChat.prototype.saveImageMessage = function(event) {
   }
   // Check if the user is signed-in
   if (this.checkSignedInWithMessage()) {
+    var currentUser = this.auth.currentUser;
+    this.messagesRef.push({
+      name: currentUser.displayName,
+      imageURL: FriendlyChat.LOADING_IMAGE_URL,
+      photoURL: currentUser.photoUrl || "images/profile_placeholder.png"
+    }).then(function (data) {
+      // Upload the image to storage n Firebase
+      var uploadTask = this.storage.ref(currentUser.uid + "/" + Date.now() + "/" + file.name).put(file, {"contentType": file.type});
 
-    // TODO(DEVELOPER): Upload image to Firebase storage and add message.
-
+      // Listen for upload completion
+      uploadTask.on("state_changed", null, function (error) {
+        console.error("Error while trying to upload a file", error)
+      }, function () {
+        // Get the file path and update the image placeholder in the message
+        var filePath = uploadTask.snapshot.metadata.fullPath;
+        data.update({
+          imageURL: this.storage.ref(filePath).toString()});
+      }.bind(this));
+    }.bind(this));
   }
 };
 
